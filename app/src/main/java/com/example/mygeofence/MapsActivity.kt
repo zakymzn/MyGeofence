@@ -2,6 +2,8 @@ package com.example.mygeofence
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.PendingIntent
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Build
@@ -19,16 +21,17 @@ import com.google.android.gms.maps.SupportMapFragment
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.MarkerOptions
 import com.example.mygeofence.databinding.ActivityMapsBinding
+import com.google.android.gms.location.Geofence
+import com.google.android.gms.location.GeofencingClient
+import com.google.android.gms.location.GeofencingRequest
+import com.google.android.gms.location.LocationServices
 import com.google.android.gms.maps.model.CircleOptions
 
 class MapsActivity : AppCompatActivity(), OnMapReadyCallback {
 
     private lateinit var mMap: GoogleMap
     private lateinit var binding: ActivityMapsBinding
-
-    // Home Coordinate
-//    private val centerLat = -7.692607842360502
-//    private val centerLng = 109.67624343931547
+    private lateinit var geofencingClient: GeofencingClient
 
     // Stanford University Coordinate
     private val centerLat = 37.4274745
@@ -79,13 +82,13 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback {
         mMap.uiSettings.isZoomControlsEnabled = true
 
         // Add a marker in Sydney and move the camera
-        val home = LatLng(centerLat, centerLng)
-        mMap.addMarker(MarkerOptions().position(home).title("Home"))
-        mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(home, 15f))
+        val stanford = LatLng(centerLat, centerLng)
+        mMap.addMarker(MarkerOptions().position(stanford).title("Stanford University"))
+        mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(stanford, 15f))
 
         mMap.addCircle(
             CircleOptions()
-                .center(home)
+                .center(stanford)
                 .radius(geofenceRadius)
                 .fillColor(0x22FF0000)
                 .strokeColor(Color.RED)
@@ -93,6 +96,7 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback {
         )
 
         getMyLocation()
+        addGeofence()
     }
 
     @RequiresApi(Build.VERSION_CODES.Q)
@@ -148,5 +152,54 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback {
         } else {
             requestLocationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
         }
+    }
+
+    private val geofencePendingIntent: PendingIntent by lazy {
+        val intent = Intent(this, GeofenceBroadcastReceiver::class.java)
+        intent.action = GeofenceBroadcastReceiver.ACTION_GEOFENCE_EVENT
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            PendingIntent.getBroadcast(this, 0, intent, PendingIntent.FLAG_MUTABLE)
+        } else {
+            PendingIntent.getBroadcast(this, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT)
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun addGeofence() {
+        geofencingClient = LocationServices.getGeofencingClient(this)
+
+        val geofence = Geofence.Builder()
+            .setRequestId("kampus")
+            .setCircularRegion(
+                centerLat,
+                centerLng,
+                geofenceRadius.toFloat()
+            )
+            .setExpirationDuration(Geofence.NEVER_EXPIRE)
+            .setTransitionTypes(Geofence.GEOFENCE_TRANSITION_DWELL or Geofence.GEOFENCE_TRANSITION_ENTER)
+            .setLoiteringDelay(5000)
+            .build()
+
+        val geofencingRequest = GeofencingRequest.Builder()
+            .setInitialTrigger(GeofencingRequest.INITIAL_TRIGGER_ENTER)
+            .addGeofence(geofence)
+            .build()
+
+        geofencingClient.removeGeofences(geofencePendingIntent).run {
+            addOnCompleteListener {
+                geofencingClient.addGeofences(geofencingRequest, geofencePendingIntent).run {
+                    addOnSuccessListener {
+                        showToast("Geofencing added")
+                    }
+                    addOnFailureListener {
+                        showToast("Geofencing not added : ${it.message}")
+                    }
+                }
+            }
+        }
+    }
+
+    private fun showToast(text: String) {
+        Toast.makeText(this@MapsActivity, text, Toast.LENGTH_SHORT).show()
     }
 }
